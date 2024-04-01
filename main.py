@@ -9,14 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import pydantic
 from typing import List 
 import psutil
- 
+import shutil
 class FTP_Login(pydantic.BaseModel):
     server:str|None=None
     username:str
     password:str
     port:int=445
 
-app = FastAPI()
+app = FastAPI(title="File Recovery API ")
 
 origins = [
     "http://localhost",
@@ -67,12 +67,29 @@ async def create_file_tree(path: str):
     else:
         raise HTTPException(500, "Cannot detect file error")
     return root
-
+### Access local using BST
 @app.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
 async def create_file_tree_endpoint(path: str):
     return await create_file_tree(path)
 
+async def get_directory_structure(path):
+    structure = {"name": os.path.basename(path)}
+    try:
+        if os.path.isdir(path):
+            structure["children"] = [await get_directory_structure(os.path.join(path, child)) for child in os.listdir(path)]
+        else:
+            structure["children"] = []
+    except PermissionError:
+        structure["children"] = []
+    return structure
 
+@app.get("/local-simpSearch", tags=["Local-File"], description="Search file using Simple method")
+async def search_simple(path: str = Query(...)):
+    if os.path.exists(path):
+        return await get_directory_structure(path)
+    else:
+        raise HTTPException(404, f"File path doesn't exist: '{path}'")
+     
 ### Download file
 @app.get("/download-file/", tags=["Local-File"], name="Download File")
 async def download_file(file_path: str):
@@ -98,12 +115,21 @@ async def get_dirs():
     disks = [partition.device for partition in disk_partitions]
 
     return {"Available disks": disks}
-### Normal OS base search
 
-@app.get("list-lc-os",tags=['Local-File'])
-async def search_local_file_os(path:str=Query(...)):
-    pass
-
+### Delete files 
+@app.delete("/delete/{file_path:path}",tags=["Delete"],name="Delete files danger zone",description="Danger zone delete files -be careful -Once file deleted wont br recover")
+async def delete_file_or_folder(file_path: str):
+    try:
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+            return {"message": f"File '{file_path}' deleted successfully"}
+        elif os.path.isdir(file_path):
+            shutil.rmtree(file_path)
+            return {"message": f"Folder '{file_path}' deleted successfully"}
+        else:
+            return {"error": f"'{file_path}' is neither a file nor a folder"}
+    except Exception as e:
+        return {"error": f"An error occurred: {e}"}
 ###RECOVER FILES
 header_files = {
     # Image formats
