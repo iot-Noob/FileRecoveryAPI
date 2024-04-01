@@ -98,7 +98,12 @@ async def get_dirs():
     disks = [partition.device for partition in disk_partitions]
 
     return {"Available disks": disks}
-    
+### Normal OS base search
+
+@app.get("list-lc-os",tags=['Local-File'])
+async def search_local_file_os(path:str=Query(...)):
+    pass
+
 ###RECOVER FILES
 header_files = {
     # Image formats
