@@ -10,8 +10,6 @@ import pydantic
 from typing import List 
 import psutil
  
-
-
 class FTP_Login(pydantic.BaseModel):
     server:str|None=None
     username:str
@@ -70,13 +68,10 @@ async def create_file_tree(path: str):
         raise HTTPException(500, "Cannot detect file error")
     return root
 
- 
-
 @app.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
 async def create_file_tree_endpoint(path: str):
     return await create_file_tree(path)
 
- 
 
 ### Download file
 @app.get("/download-file/", tags=["Local-File"], name="Download File")
