@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI,File,HTTPException,UploadFile,Query,Form
+from fastapi import FastAPI,File,HTTPException,UploadFile,Query,Form,Depends
 from fastapi.responses import FileResponse,Response,HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 # from fs.osfs import OSFS
@@ -10,6 +10,43 @@ import pydantic
 from typing import List 
 import psutil
 import shutil
+import jwt
+from jwt import PyJWTError
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import toml
+
+###Fake DB
+fake_db = {
+    "Talha": "Talha@6295",
+    "Hacker": "Talha@434"
+}
+
+### Security checkpoint
+jetk=toml.load(r".\\key.toml")
+
+key=jetk['security-key']['JWT-KEY']
+algo=jetk['security-key']['ALGORITHM']
+security = HTTPBearer()
+
+def create_access_token(data: dict):
+    return jwt.encode(data,key=key, algorithm=algo)
+
+def decode_token(token: str):
+    try:
+        payload = jwt.decode(token,key, algorithms=[algo])
+        return payload
+    except PyJWTError:
+        return None
+ 
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    payload = decode_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload["sub"]
+
+### Implimentation
+
 class FTP_Login(pydantic.BaseModel):
     server:str|None=None
     username:str
@@ -33,6 +70,25 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+## Security endpoint
+@app.get("/secure-endpoint/", tags=["Secure Endpoint"])
+async def secure_endpoint(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    payload = decode_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    # Proceed with your secure operations here
+    return {"message": "This is a secure endpoint"}
+
+### Login
+@app.post("/login/", tags=["Authentication"])
+async def login(username: str = Form(...), password: str = Form(...)):
+    if username in fake_db and fake_db[username] == password:
+        token = create_access_token({"sub": username})
+        return {"access_token": token, "token_type": "bearer"}
+    else:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
 ## Make binary tree
 
@@ -69,7 +125,7 @@ async def create_file_tree(path: str):
     return root
 ### Access local using BST
 @app.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
-async def create_file_tree_endpoint(path: str):
+async def create_file_tree_endpoint(path: str,s:str=Depends(get_current_user)):
     return await create_file_tree(path)
 
 async def get_directory_structure(path):
@@ -84,7 +140,7 @@ async def get_directory_structure(path):
     return structure
 
 @app.get("/local-simpSearch", tags=["Local-File"], description="Search file using Simple method")
-async def search_simple(path: str = Query(...)):
+async def search_simple(path: str = Query(...),s:str=Depends(get_current_user)):
     if os.path.exists(path):
         return await get_directory_structure(path)
     else:
@@ -92,7 +148,7 @@ async def search_simple(path: str = Query(...)):
      
 ### Download file
 @app.get("/download-file/", tags=["Local-File"], name="Download File")
-async def download_file(file_path: str):
+async def download_file(file_path: str,s:str=Depends(get_current_user)):
     """
     Download a file from the binary tree file system.
 
@@ -107,7 +163,7 @@ async def download_file(file_path: str):
 ## List local dirs
 
 @app.get("/list_dirs", tags=["Local-File"],name="Directory List") 
-async def get_dirs():
+async def get_dirs(s:str=Depends(get_current_user)):
     # Get a list of all disk partitions
     disk_partitions = psutil.disk_partitions()
 
@@ -118,7 +174,7 @@ async def get_dirs():
 
 ### Delete files 
 @app.delete("/delete/{file_path:path}",tags=["Delete"],name="Delete files danger zone",description="Danger zone delete files -be careful -Once file deleted wont br recover")
-async def delete_file_or_folder(file_path: str):
+async def delete_file_or_folder(file_path: str,s:str=Depends(get_current_user)):
     try:
         if os.path.isfile(file_path):
             os.remove(file_path)
@@ -159,7 +215,7 @@ header_files = {
     # Add more headers for other file formats as needed
 }
 
-async def recover_files(drive: str, selected_formats: List[str], destination_folder: str):
+async def recover_files(drive: str, selected_formats: List[str], destination_folder: str,s:str=Depends(get_current_user)):
     fileD = open(drive, "rb")
     size = 512              # Size of bytes to read
     offs = 0                # Offset location
@@ -204,6 +260,7 @@ async def recover_files_endpoint(
     drive: str = Form(...),
     selected_formats: List[str] = Form(...),
     destination_folder: str = Form(...),
+    s:str=Depends(get_current_user)
 ):
     if not os.path.exists(destination_folder):
         os.mkdir(destination_folder)
@@ -213,7 +270,7 @@ async def recover_files_endpoint(
     return {"recovered_files": recovered_files}
 
 @app.get("/download-recovered-file/", tags=["Data Recovery"])
-async def download_recovered_file(file_path: str):
+async def download_recovered_file(file_path: str,s:str=Depends(get_current_user)):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     
