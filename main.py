@@ -19,6 +19,7 @@ import sqlite3
 from createTable import create_tables,QueryRun
 from pydantic import BaseModel,Field, EmailStr
 import hashlib
+from datetime import datetime
 
 ### Security checkpoint
 jetk=toml.load(r"./key.toml")
@@ -81,14 +82,20 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
  
 
-def authenticate_user(token: str = Depends(oauth2_scheme)):
+def is_token_valid(token: str = Depends(security)):
     try:
-        payload = jwt.decode(token, key, algorithms=[algo])
-        username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        # You can do further checks here, like checking if the user exists in the database
-        return username
+        payload = jwt.decode(token.credentials, key, algorithms=[algo])
+        expiration_time = datetime.utcfromtimestamp(payload['exp'])
+        if expiration_time > datetime.utcnow():
+            # Check if the user exists in the database or perform any other necessary checks
+            username: str = payload.get("sub")
+            if username is None:
+                raise HTTPException(status_code=401, detail="Invalid token")
+            # Additional checks if needed
+            # ...
+            return True
+        else:
+            raise HTTPException(status_code=401, detail="Token has expired")
     except PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
  
@@ -190,7 +197,7 @@ async def update_profile(
     new_password: str = Form(None),
     new_email: str = Form(None),
     db: sqlite3.Connection = Depends(get_db),
-    token: str = Depends(oauth2_scheme)  # Use Depends to inject the database connection
+    token: str = Depends(is_token_valid)  # Use Depends to inject the database connection
 ):
     # Check if the user exists in the database
     user_query = "SELECT * FROM User WHERE id = ?"
@@ -231,7 +238,7 @@ async def update_profile(
 async def delete_user(
     user_id: int,
     db: sqlite3.Connection = Depends(get_db),
-    token: str = Depends(oauth2_scheme)
+    token: str = Depends(is_token_valid)
 ):
     # Check if the user exists in the database
     user_query = "SELECT * FROM User WHERE id = ?"
@@ -278,7 +285,7 @@ async def create_file_tree(path: str):
     return root
 ### Access local using BST
 @app.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
-async def create_file_tree_endpoint(path: str,token: str = Depends(oauth2_scheme)):
+async def create_file_tree_endpoint(path: str,token: str = Depends(is_token_valid)):
     return await create_file_tree(path)
 
 async def get_directory_structure(path):
@@ -293,7 +300,7 @@ async def get_directory_structure(path):
     return structure
 
 @app.get("/local-simpSearch", tags=["Local-File"], description="Search file using Simple method")
-async def search_simple(path: str = Query(...),token: str = Depends(oauth2_scheme)):
+async def search_simple(path: str = Query(...),token: str = Depends(is_token_valid)):
     if os.path.exists(path):
         return await get_directory_structure(path)
     else:
@@ -301,7 +308,7 @@ async def search_simple(path: str = Query(...),token: str = Depends(oauth2_schem
      
 ### Download file
 @app.get("/download-file/", tags=["Local-File"], name="Download File")
-async def download_file(file_path: str,token: str = Depends(oauth2_scheme)):
+async def download_file(file_path: str,token: str = Depends(is_token_valid)):
     """
     Download a file from the binary tree file system.
 
@@ -316,7 +323,7 @@ async def download_file(file_path: str,token: str = Depends(oauth2_scheme)):
 ## List local dirs
 
 @app.get("/list_dirs", tags=["Local-File"],name="Directory List") 
-async def get_dirs(token: str = Depends(oauth2_scheme) ):
+async def get_dirs(token: str = Depends(is_token_valid) ):
     # Get a list of all disk partitions
     disk_partitions = psutil.disk_partitions()
 
@@ -327,7 +334,7 @@ async def get_dirs(token: str = Depends(oauth2_scheme) ):
 
 ### Delete files 
 @app.delete("/delete/{file_path:path}",tags=["Delete"],name="Delete files danger zone",description="Danger zone delete files -be careful -Once file deleted wont br recover")
-async def delete_file_or_folder(file_path: str,token: str = Depends(oauth2_scheme)):
+async def delete_file_or_folder(file_path: str,token: str = Depends(is_token_valid)):
     try:
         if os.path.isfile(file_path):
             os.remove(file_path)
@@ -368,7 +375,7 @@ header_files = {
     # Add more headers for other file formats as needed
 }
 
-async def recover_files(drive: str, selected_formats: List[str], destination_folder: str,token: str = Depends(oauth2_scheme)):
+async def recover_files(drive: str, selected_formats: List[str], destination_folder: str,token: str = Depends(is_token_valid)):
     fileD = open(drive, "rb")
     size = 512              # Size of bytes to read
     offs = 0                # Offset location
@@ -413,7 +420,7 @@ async def recover_files_endpoint(
     drive: str = Form(...),
     selected_formats: List[str] = Form(...),
     destination_folder: str = Form(...) ,
-    token: str = Depends(oauth2_scheme)
+    token: str = Depends(is_token_valid)
 ):
     if not os.path.exists(destination_folder):
         os.mkdir(destination_folder)
@@ -423,7 +430,7 @@ async def recover_files_endpoint(
     return {"recovered_files": recovered_files}
 
 @app.get("/download-recovered-file/", tags=["Data Recovery"])
-async def download_recovered_file(file_path: str,token: str = Depends(oauth2_scheme)):
+async def download_recovered_file(file_path: str,token: str = Depends(is_token_valid)):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     
