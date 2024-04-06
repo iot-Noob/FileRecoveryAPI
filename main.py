@@ -83,8 +83,6 @@ async def decode_jwt(token: str) -> dict:
         return payload
     except Exception as e:
         raise HTTPException(401, detail="Invalid JWT token")
-    
-
 ### Secure API
  
 def hash_password(password):
