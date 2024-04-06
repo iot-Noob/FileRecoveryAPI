@@ -14,12 +14,11 @@ import jwt
 from jwt import PyJWTError
 from fastapi.security import HTTPBearer,OAuth2PasswordBearer
 import toml
-import datetime
 import sqlite3
 from createTable import create_tables,QueryRun
 from pydantic import BaseModel,Field, EmailStr
 import hashlib
-from datetime import datetime
+import datetime
 
 ### Security checkpoint
 jetk=toml.load(r"./key.toml")
@@ -113,7 +112,7 @@ async def login_for_access_token(username: str = Form(...), password: str = Form
     if result:
         # Generate the access token
         access_token_expires = datetime.timedelta(minutes=30)
-        to_encode = {"sub": username, "exp":datetime.datetime.now(datetime.timezone.utc) + access_token_expires}
+        to_encode = {"sub": username, "exp": datetime.datetime.now(datetime.timezone.utc) + access_token_expires}
         token = jwt.encode(to_encode, key, algorithm=algo)
         
         # Get the user ID
@@ -144,9 +143,7 @@ async def login_for_access_token(username: str = Form(...), password: str = Form
             raise HTTPException(status_code=500, detail="Failed to retrieve user ID")
     else:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
-
-
-
+ 
 
 # Endpoint for user signup
  #test
