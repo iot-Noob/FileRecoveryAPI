@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI,File,HTTPException,UploadFile,Query,Form,Depends 
+from fastapi import FastAPI,File,HTTPException,UploadFile,Query,Form,Depends ,Form, HTTPException
 from fastapi.responses import FileResponse,Response,HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 # from fs.osfs import OSFS
@@ -100,11 +100,7 @@ def is_token_valid(token: str = Depends(security)):
         raise HTTPException(status_code=401, detail="Invalid token")
  
 
-
-from fastapi import Form, HTTPException
-import datetime
-import jwt
-
+### Login
 @app.post("/token", tags=['Authentication'])
 async def login_for_access_token(username: str = Form(...), password: str = Form(...)):
     # Hash the provided password
