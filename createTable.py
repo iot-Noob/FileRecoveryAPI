@@ -18,6 +18,7 @@ def create_tables(db_file):
         creation_date DATETIME DEFAULT CURRENT_TIMESTAMP,
         is_online BOOLEAN NOT NULL,
         token_id INT,
+        user_role VARCHAR,
         FOREIGN KEY (token_id) REFERENCES User_Token(user_id)
     )
     """

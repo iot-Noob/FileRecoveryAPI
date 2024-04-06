@@ -160,8 +160,8 @@ async def signup(user_info: UserSignup):
         raise HTTPException(status_code=400, detail="Username or email already exists")
 
     # Insert the new user into the database
-    insert_query = "INSERT INTO User (username, password, email, is_online) VALUES (?, ?, ?, ?)"
-    insert_values = (user_info.username, hashed_password, user_info.email, False)
+    insert_query = "INSERT INTO User (username, password, email, is_online,user_role) VALUES (?, ?, ?, ?,?)"
+    insert_values = (user_info.username, hashed_password, user_info.email, False,"user")
     QueryRun(dp_paths, insert_query, insert_values)
 
     # Get the ID of the newly inserted user
