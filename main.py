@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI,File,HTTPException,UploadFile,Query,Form,Depends
+from fastapi import FastAPI,File,HTTPException,UploadFile,Query,Form,Depends 
 from fastapi.responses import FileResponse,Response,HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 # from fs.osfs import OSFS
@@ -12,46 +12,38 @@ import psutil
 import shutil
 import jwt
 from jwt import PyJWTError
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer,OAuth2PasswordBearer
 import toml
-
-###Fake DB
-fake_db = {
-    "Talha": "Talha@6295",
-    "Hacker": "Talha@434"
-}
+import datetime
+import sqlite3
+from createTable import create_tables,QueryRun
+from pydantic import BaseModel,Field, EmailStr
+import hashlib
 
 ### Security checkpoint
-jetk=toml.load(r".\\key.toml")
+jetk=toml.load(r"./key.toml")
 
 key=jetk['security-key']['JWT-KEY']
 algo=jetk['security-key']['ALGORITHM']
 security = HTTPBearer()
-
-def create_access_token(data: dict):
-    return jwt.encode(data,key=key, algorithm=algo)
-
-def decode_token(token: str):
-    try:
-        payload = jwt.decode(token,key, algorithms=[algo])
-        return payload
-    except PyJWTError:
-        return None
+dp_paths=jetk['db-info']['db_path']
  
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = decode_token(token)
-    if payload is None:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return payload["sub"]
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
 ### Implimentation
 
+## FTP Login model
 class FTP_Login(pydantic.BaseModel):
     server:str|None=None
     username:str
     password:str
     port:int=445
+
+class UserSignup(BaseModel):
+    username: str = Field(..., description="The username for the new user")
+    password: str = Field(..., description="The password for the new user")
+    email: EmailStr = Field(..., description="The email address for the new user")
+
 
 app = FastAPI(title="File Recovery API ")
 
@@ -62,6 +54,17 @@ origins = [
     # Add more origins as needed
 ]
 
+## Startup event 
+
+def startup_event():
+    print("API is starting...")
+    create_tables(dp_paths)
+    
+    
+@app.on_event("startup")
+async def startup():
+    startup_event()
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -70,33 +73,134 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+ 
+### Secure API
 
-## Security endpoint
-@app.get("/secure-endpoint/", tags=["Secure Endpoint"])
-async def secure_endpoint(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = decode_token(token)
-    if payload is None:
+def hash_password(password):
+    # You can choose a hashing algorithm here, like SHA-256
+    return hashlib.sha256(password.encode()).hexdigest()
+ 
+
+def authenticate_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, key, algorithms=[algo])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        # You can do further checks here, like checking if the user exists in the database
+        return username
+    except PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
-    # Proceed with your secure operations here
-    return {"message": "This is a secure endpoint"}
+ 
 
-### Login
-@app.post("/login/", tags=["Authentication"])
-async def login(username: str = Form(...), password: str = Form(...)):
-    if username in fake_db and fake_db[username] == password:
-        token = create_access_token({"sub": username})
+
+@app.post("/token", tags=['Authentication'])
+async def login_for_access_token(username: str = Form(...), password: str = Form(...)):
+    # Hash the provided password
+    hashed_password = hash_password(password)
+    
+    # Query the database to verify user
+    query = f"SELECT * FROM User WHERE username = ? AND password = ?"
+    result = QueryRun(dp_paths, query, (username, hashed_password))
+    if result:
+        access_token_expires = datetime.timedelta(minutes=30)
+        to_encode = {"sub": username, "exp": datetime.datetime.utcnow() + access_token_expires}
+        token = jwt.encode(to_encode,key, algorithm=algo)
         return {"access_token": token, "token_type": "bearer"}
     else:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
 
-## Make binary tree
+# Endpoint for user signup
+ 
+@app.post("/signup", tags=["Authentication"], response_model=dict)
+async def signup(user_info: UserSignup):
+    # Hash the provided password before storing it
+    hashed_password = hash_password(user_info.password)
 
+    # Check if the username or email already exists in the database
+    check_query = "SELECT * FROM User WHERE username = ? OR email = ?"
+    check_result = QueryRun(dp_paths, check_query, (user_info.username, user_info.email))
+
+    if check_result:
+        raise HTTPException(status_code=400, detail="Username or email already exists")
+
+    # Insert the new user into the database
+    insert_query = "INSERT INTO User (username, password, email, is_online) VALUES (?, ?, ?, ?)"
+    insert_values = (user_info.username, hashed_password, user_info.email, False)
+    QueryRun(dp_paths, insert_query, insert_values)
+
+    return {"message": "User signed up successfully"}
+
+## Update user
+def get_db():
+    return dp_paths 
+@app.patch("/update-profile/{user_id}",tags=['Authentication'])
+async def update_profile(
+    user_id: int, 
+    new_username: str = Form(None),
+    new_password: str = Form(None),
+    new_email: str = Form(None),
+    db: sqlite3.Connection = Depends(get_db),
+    token: str = Depends(oauth2_scheme)  # Use Depends to inject the database connection
+):
+    # Check if the user exists in the database
+    user_query = "SELECT * FROM User WHERE id = ?"
+    user_result = QueryRun(db, user_query, (user_id,))
+    if not user_result:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Update the user profile fields if new values are provided
+    update_query = "UPDATE User SET"
+    update_values = []
+
+    if new_username:
+        update_query += " username = ?,"
+        update_values.append(new_username)
+
+    if new_password:
+        update_query += " password = ?,"
+        update_values.append(new_password)
+
+    if new_email:
+        update_query += " email = ?,"
+        update_values.append(new_email)
+
+    # Remove the trailing comma from the update_query
+    update_query = update_query.rstrip(",")
+
+    # Add the WHERE clause to specify the user to update
+    update_query += " WHERE id = ?"
+    update_values.append(user_id)
+
+    # Execute the update query
+    QueryRun(db, update_query, update_values)
+
+    return {"message": "User profile updated successfully"}
+
+# Delete user
+@app.delete("/delete-user/{user_id}", tags=['Authentication'])
+async def delete_user(
+    user_id: int,
+    db: sqlite3.Connection = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+):
+    # Check if the user exists in the database
+    user_query = "SELECT * FROM User WHERE id = ?"
+    user_result = QueryRun(db, user_query, (user_id,))
+    if not user_result:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Delete the user from the database
+    delete_query = "DELETE FROM User WHERE id = ?"
+    QueryRun(db, delete_query, (user_id,))
+
+    return {"message": "User deleted successfully"}
+##BST for file 
+ 
 class TreeNode:
     def __init__(self, name):
         self.name = name
         self.children = []
- 
 async def create_file_tree(path: str):
     root = TreeNode(path)
     if os.path.exists(path):
@@ -125,7 +229,7 @@ async def create_file_tree(path: str):
     return root
 ### Access local using BST
 @app.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
-async def create_file_tree_endpoint(path: str,s:str=Depends(get_current_user)):
+async def create_file_tree_endpoint(path: str,token: str = Depends(oauth2_scheme)):
     return await create_file_tree(path)
 
 async def get_directory_structure(path):
@@ -140,7 +244,7 @@ async def get_directory_structure(path):
     return structure
 
 @app.get("/local-simpSearch", tags=["Local-File"], description="Search file using Simple method")
-async def search_simple(path: str = Query(...),s:str=Depends(get_current_user)):
+async def search_simple(path: str = Query(...),token: str = Depends(oauth2_scheme)):
     if os.path.exists(path):
         return await get_directory_structure(path)
     else:
@@ -148,7 +252,7 @@ async def search_simple(path: str = Query(...),s:str=Depends(get_current_user)):
      
 ### Download file
 @app.get("/download-file/", tags=["Local-File"], name="Download File")
-async def download_file(file_path: str,s:str=Depends(get_current_user)):
+async def download_file(file_path: str,token: str = Depends(oauth2_scheme)):
     """
     Download a file from the binary tree file system.
 
@@ -163,7 +267,7 @@ async def download_file(file_path: str,s:str=Depends(get_current_user)):
 ## List local dirs
 
 @app.get("/list_dirs", tags=["Local-File"],name="Directory List") 
-async def get_dirs(s:str=Depends(get_current_user)):
+async def get_dirs(token: str = Depends(oauth2_scheme) ):
     # Get a list of all disk partitions
     disk_partitions = psutil.disk_partitions()
 
@@ -174,7 +278,7 @@ async def get_dirs(s:str=Depends(get_current_user)):
 
 ### Delete files 
 @app.delete("/delete/{file_path:path}",tags=["Delete"],name="Delete files danger zone",description="Danger zone delete files -be careful -Once file deleted wont br recover")
-async def delete_file_or_folder(file_path: str,s:str=Depends(get_current_user)):
+async def delete_file_or_folder(file_path: str,token: str = Depends(oauth2_scheme)):
     try:
         if os.path.isfile(file_path):
             os.remove(file_path)
@@ -215,7 +319,7 @@ header_files = {
     # Add more headers for other file formats as needed
 }
 
-async def recover_files(drive: str, selected_formats: List[str], destination_folder: str,s:str=Depends(get_current_user)):
+async def recover_files(drive: str, selected_formats: List[str], destination_folder: str,token: str = Depends(oauth2_scheme)):
     fileD = open(drive, "rb")
     size = 512              # Size of bytes to read
     offs = 0                # Offset location
@@ -259,8 +363,8 @@ async def recover_files(drive: str, selected_formats: List[str], destination_fol
 async def recover_files_endpoint(
     drive: str = Form(...),
     selected_formats: List[str] = Form(...),
-    destination_folder: str = Form(...),
-    s:str=Depends(get_current_user)
+    destination_folder: str = Form(...) ,
+    token: str = Depends(oauth2_scheme)
 ):
     if not os.path.exists(destination_folder):
         os.mkdir(destination_folder)
@@ -270,7 +374,7 @@ async def recover_files_endpoint(
     return {"recovered_files": recovered_files}
 
 @app.get("/download-recovered-file/", tags=["Data Recovery"])
-async def download_recovered_file(file_path: str,s:str=Depends(get_current_user)):
+async def download_recovered_file(file_path: str,token: str = Depends(oauth2_scheme)):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     
