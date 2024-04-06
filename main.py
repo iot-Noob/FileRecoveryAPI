@@ -77,7 +77,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def decode_jwt(token: str) -> dict:
+async def decode_jwt(token: str) -> dict:
     try:
         payload = decode(token, key, algorithms=[algo])
         return payload
@@ -91,8 +91,7 @@ def hash_password(password):
     # You can choose a hashing algorithm here, like SHA-256
     return hashlib.sha256(password.encode()).hexdigest()
 
-
-def is_token_valid(token: str = Depends(security)):
+async def is_token_valid_v2(token: str = Depends(security)):
     try:
         payload = jwt.decode(token.credentials, key, algorithms=[algo])
         expiration_time = datetime.datetime.fromtimestamp(payload['exp'], datetime.timezone.utc)
@@ -103,13 +102,13 @@ def is_token_valid(token: str = Depends(security)):
                 raise HTTPException(status_code=401, detail="Invalid token")
             # Additional checks if needed
             # ...
-            return True
+            return  token
         else:
             raise HTTPException(status_code=401, detail="Token has expired")
     except PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
  
-
+ 
 ### Login
 @app.post("/token", tags=['Authentication'])
 async def login_for_access_token(username: str = Form(...), password: str = Form(...)):
@@ -201,51 +200,47 @@ async def update_profile(
     new_password: str = Form(None),
     new_email: str = Form(None),
     db: sqlite3.Connection = Depends(get_db),
-    token: str = Depends(is_token_valid)  # Use Depends to inject the database connection
-):
-    gcun=decode_jwt(token=token)['sub'] #get current username
+    token: str = Depends(is_token_valid_v2)  # Use Depends to inject the database connection
+):  
     # Check if the user exists in the database
     user_query = "SELECT * FROM User WHERE id = ?"
     user_result = QueryRun(db, user_query, (user_id,))
     if not user_result:
         raise HTTPException(status_code=404, detail="User not found")
-    else:
-        idbun=QueryRun(db=db,q="SELECT id FROM User WHERE username LIKE ?",params=(gcun))
-        if idbun:
-            # Update the user profile fields if new values are provided
-            update_query = "UPDATE User SET"
-            update_values = []
+    # Update the user profile fields if new values are provided
+    update_query = "UPDATE User SET"
+    update_values = []
 
-            if new_username:
-                update_query += " username = ?,"
-                update_values.append(new_username)
+    if new_username:
+        update_query += " username = ?,"
+        update_values.append(new_username)
 
-            if new_password:
-                update_query += " password = ?,"
-                update_values.append(new_password)
+    if new_password:
+        update_query += " password = ?,"
+        update_values.append(new_password)
 
-            if new_email:
-                update_query += " email = ?,"
-                update_values.append(new_email)
+    if new_email:
+        update_query += " email = ?,"
+        update_values.append(new_email)
 
-            # Remove the trailing comma from the update_query
-            update_query = update_query.rstrip(",")
+    # Remove the trailing comma from the update_query
+    update_query = update_query.rstrip(",")
 
-            # Add the WHERE clause to specify the user to update
-            update_query += " WHERE id = ?"
-            update_values.append(user_id)
+    # Add the WHERE clause to specify the user to update
+    update_query += " WHERE id = ?"
+    update_values.append(user_id)
 
-            # Execute the update query
-            QueryRun(db, update_query, update_values)
+    # Execute the update query
+    QueryRun(db, update_query, update_values)
 
-            return {"message": "User profile updated successfully"}
+    return {"message": "User profile updated successfully"}
 
 # Delete user
 @app.delete("/delete-user/{user_id}", tags=['Authentication'])
 async def delete_user(
     user_id: int,
     db: sqlite3.Connection = Depends(get_db),
-    token: str = Depends(is_token_valid)
+    token: str = Depends(is_token_valid_v2)
 ):
     # Check if the user exists in the database
     user_query = "SELECT * FROM User WHERE id = ?"
@@ -292,7 +287,7 @@ async def create_file_tree(path: str):
     return root
 ### Access local using BST
 @app.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
-async def create_file_tree_endpoint(path: str,token: str = Depends(is_token_valid)):
+async def create_file_tree_endpoint(path: str,token: str = Depends(is_token_valid_v2)):
     return await create_file_tree(path)
 
 async def get_directory_structure(path):
@@ -307,7 +302,7 @@ async def get_directory_structure(path):
     return structure
 
 @app.get("/local-simpSearch", tags=["Local-File"], description="Search file using Simple method")
-async def search_simple(path: str = Query(...),token: str = Depends(is_token_valid)):
+async def search_simple(path: str = Query(...),token: str = Depends(is_token_valid_v2)):
     if os.path.exists(path):
         return await get_directory_structure(path)
     else:
@@ -315,7 +310,7 @@ async def search_simple(path: str = Query(...),token: str = Depends(is_token_val
      
 ### Download file
 @app.get("/download-file/", tags=["Local-File"], name="Download File")
-async def download_file(file_path: str,token: str = Depends(is_token_valid)):
+async def download_file(file_path: str,token: str = Depends(is_token_valid_v2)):
     """
     Download a file from the binary tree file system.
 
@@ -330,7 +325,7 @@ async def download_file(file_path: str,token: str = Depends(is_token_valid)):
 ## List local dirs
 
 @app.get("/list_dirs", tags=["Local-File"],name="Directory List") 
-async def get_dirs(token: str = Depends(is_token_valid) ):
+async def get_dirs(token: str = Depends(is_token_valid_v2) ):
     # Get a list of all disk partitions
     disk_partitions = psutil.disk_partitions()
 
@@ -341,7 +336,7 @@ async def get_dirs(token: str = Depends(is_token_valid) ):
 
 ### Delete files 
 @app.delete("/delete/{file_path:path}",tags=["Delete"],name="Delete files danger zone",description="Danger zone delete files -be careful -Once file deleted wont br recover")
-async def delete_file_or_folder(file_path: str,token: str = Depends(is_token_valid)):
+async def delete_file_or_folder(file_path: str,token: str = Depends(is_token_valid_v2)):
     try:
         if os.path.isfile(file_path):
             os.remove(file_path)
@@ -382,7 +377,7 @@ header_files = {
     # Add more headers for other file formats as needed
 }
 
-async def recover_files(drive: str, selected_formats: List[str], destination_folder: str,token: str = Depends(is_token_valid)):
+async def recover_files(drive: str, selected_formats: List[str], destination_folder: str,token: str = Depends(is_token_valid_v2)):
     fileD = open(drive, "rb")
     size = 512              # Size of bytes to read
     offs = 0                # Offset location
@@ -427,7 +422,7 @@ async def recover_files_endpoint(
     drive: str = Form(...),
     selected_formats: List[str] = Form(...),
     destination_folder: str = Form(...) ,
-    token: str = Depends(is_token_valid)
+    token: str = Depends(is_token_valid_v2)
 ):
     if not os.path.exists(destination_folder):
         os.mkdir(destination_folder)
@@ -437,7 +432,7 @@ async def recover_files_endpoint(
     return {"recovered_files": recovered_files}
 
 @app.get("/download-recovered-file/", tags=["Data Recovery"])
-async def download_recovered_file(file_path: str,token: str = Depends(is_token_valid)):
+async def download_recovered_file(file_path: str,token: str = Depends(is_token_valid_v2)):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     
