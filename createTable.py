@@ -12,11 +12,13 @@ def create_tables(db_file):
     user_table = """
     CREATE TABLE IF NOT EXISTS User (
         id INTEGER PRIMARY KEY AUTOINCREMENT,  
-        username VARCHAR(300) NOT NULL UNIQUE,
+        username VARCHAR(100) NOT NULL UNIQUE,
         password VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL UNIQUE,
         creation_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-        is_online BOOLEAN NOT NULL
+        is_online BOOLEAN NOT NULL,
+        token_id INT,
+        FOREIGN KEY (token_id) REFERENCES User_Token(user_id)
     )
     """
 
@@ -24,15 +26,26 @@ def create_tables(db_file):
     CREATE TABLE IF NOT EXISTS User_Permission (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INT,
-        permission VARCHAR NOT NULL,
-        filepath VARCHAR NOT NULL,
+        permission VARCHAR(100) NOT NULL,
+        filepath VARCHAR(255) NOT NULL,
         FOREIGN KEY (user_id) REFERENCES User(id)
     )
     """
 
+    user_token_table = """
+    CREATE TABLE IF NOT EXISTS User_Token (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INT,
+        token VARCHAR(255) UNIQUE,
+        FOREIGN KEY (user_id) REFERENCES User(id)
+    )
+    """
+
+
     try:
         cursor.execute(user_table)
         cursor.execute(user_permission_table)
+        cursor.execute(user_token_table)
         conn.commit()
         print("Tables created successfully!")
     except sqlite3.Error as error:

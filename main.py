@@ -94,21 +94,56 @@ def authenticate_user(token: str = Depends(oauth2_scheme)):
  
 
 
+from fastapi import Form, HTTPException
+import datetime
+import jwt
+
 @app.post("/token", tags=['Authentication'])
 async def login_for_access_token(username: str = Form(...), password: str = Form(...)):
     # Hash the provided password
     hashed_password = hash_password(password)
     
     # Query the database to verify user
-    query = f"SELECT * FROM User WHERE username = ? AND password = ?"
-    result = QueryRun(dp_paths, query, (username, hashed_password))
+    query = "SELECT * FROM User WHERE username = ? AND password = ?"
+    result = QueryRun(db=dp_paths, q=query, params=(username, hashed_password))
+    
     if result:
+        # Generate the access token
         access_token_expires = datetime.timedelta(minutes=30)
         to_encode = {"sub": username, "exp": datetime.datetime.utcnow() + access_token_expires}
-        token = jwt.encode(to_encode,key, algorithm=algo)
-        return {"access_token": token, "token_type": "bearer"}
+        token = jwt.encode(to_encode, key, algorithm=algo)
+        
+        # Get the user ID
+        quid = "SELECT id FROM User WHERE username=?"
+        ap = (username,)
+        cid_result = QueryRun(db=dp_paths, q=quid, params=ap)
+        
+        if cid_result:
+            cid = cid_result[0][0]  # Extract user ID from the result
+            
+            # Check if the user ID exists in User_Token table
+            check_token_query = "SELECT id FROM User_Token WHERE user_id = ?"
+            check_token_result = QueryRun(db=dp_paths, q=check_token_query, params=(cid,))
+            
+            if check_token_result:
+                # Update the token
+                update_token_query = "UPDATE User_Token SET token = ? WHERE user_id = ?"
+                update_token_values = (token, cid)
+                QueryRun(db=dp_paths, q=update_token_query, params=update_token_values)
+            else:
+                # Insert a new token for the user
+                insert_token_query = "INSERT INTO User_Token (user_id, token) VALUES (?, ?)"
+                insert_token_values = (cid, token)
+                QueryRun(db=dp_paths, q=insert_token_query, params=insert_token_values)
+            
+            return {"access_token": token, "token_type": "bearer"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to retrieve user ID")
     else:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+
+
 
 # Endpoint for user signup
  #test
@@ -129,7 +164,21 @@ async def signup(user_info: UserSignup):
     insert_values = (user_info.username, hashed_password, user_info.email, False)
     QueryRun(dp_paths, insert_query, insert_values)
 
-    return {"message": "User signed up successfully"}
+    # Get the ID of the newly inserted user
+    get_user_id_query = "SELECT id FROM User WHERE username = ?"
+    user_id_result = QueryRun(dp_paths, get_user_id_query, (user_info.username,))
+    if user_id_result:
+        user_id = user_id_result[0][0]
+    else:
+        raise HTTPException(status_code=500, detail="Failed to retrieve user ID after signup")
+
+    # Update the token_id with the user's ID
+    update_token_id_query = "UPDATE User SET token_id = ? WHERE id = ?"
+    update_token_id_values = (user_id, user_id)
+    QueryRun(dp_paths, update_token_id_query, update_token_id_values)
+
+    return {"message": "User signed up successfully", "user_id": user_id}
+
 
 ## Update user
 def get_db():
