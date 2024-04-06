@@ -85,8 +85,8 @@ def hash_password(password):
 def is_token_valid(token: str = Depends(security)):
     try:
         payload = jwt.decode(token.credentials, key, algorithms=[algo])
-        expiration_time = datetime.utcfromtimestamp(payload['exp'])
-        if expiration_time > datetime.utcnow():
+        expiration_time = datetime.datetime.fromtimestamp(payload['exp'], datetime.timezone.utc)
+        if expiration_time > datetime.datetime.now(datetime.timezone.utc):
             # Check if the user exists in the database or perform any other necessary checks
             username: str = payload.get("sub")
             if username is None:
