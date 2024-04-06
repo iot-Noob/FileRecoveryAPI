@@ -11,6 +11,7 @@ from typing import List
 import psutil
 import shutil
 import jwt
+from jwt import decode
 from jwt import PyJWTError
 from fastapi.security import HTTPBearer,OAuth2PasswordBearer
 import toml
@@ -19,6 +20,7 @@ from createTable import create_tables,QueryRun
 from pydantic import BaseModel,Field, EmailStr
 import hashlib
 import datetime
+from fastapi.responses import JSONResponse
 
 ### Security checkpoint
 jetk=toml.load(r"./key.toml")
@@ -44,6 +46,7 @@ class UserSignup(BaseModel):
     password: str = Field(..., description="The password for the new user")
     email: EmailStr = Field(..., description="The email address for the new user")
 
+### Start of Fastapi
 
 app = FastAPI(title="File Recovery API ")
 
@@ -73,13 +76,21 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
- 
-### Secure API
 
+def decode_jwt(token: str) -> dict:
+    try:
+        payload = decode(token, key, algorithms=[algo])
+        return payload
+    except Exception as e:
+        raise HTTPException(401, detail="Invalid JWT token")
+    
+
+### Secure API
+ 
 def hash_password(password):
     # You can choose a hashing algorithm here, like SHA-256
     return hashlib.sha256(password.encode()).hexdigest()
- 
+
 
 def is_token_valid(token: str = Depends(security)):
     try:
@@ -192,39 +203,42 @@ async def update_profile(
     db: sqlite3.Connection = Depends(get_db),
     token: str = Depends(is_token_valid)  # Use Depends to inject the database connection
 ):
+    gcun=decode_jwt(token=token)['sub'] #get current username
     # Check if the user exists in the database
     user_query = "SELECT * FROM User WHERE id = ?"
     user_result = QueryRun(db, user_query, (user_id,))
     if not user_result:
         raise HTTPException(status_code=404, detail="User not found")
+    else:
+        idbun=QueryRun(db=db,q="SELECT id FROM User WHERE username LIKE ?",params=(gcun))
+        if idbun:
+            # Update the user profile fields if new values are provided
+            update_query = "UPDATE User SET"
+            update_values = []
 
-    # Update the user profile fields if new values are provided
-    update_query = "UPDATE User SET"
-    update_values = []
+            if new_username:
+                update_query += " username = ?,"
+                update_values.append(new_username)
 
-    if new_username:
-        update_query += " username = ?,"
-        update_values.append(new_username)
+            if new_password:
+                update_query += " password = ?,"
+                update_values.append(new_password)
 
-    if new_password:
-        update_query += " password = ?,"
-        update_values.append(new_password)
+            if new_email:
+                update_query += " email = ?,"
+                update_values.append(new_email)
 
-    if new_email:
-        update_query += " email = ?,"
-        update_values.append(new_email)
+            # Remove the trailing comma from the update_query
+            update_query = update_query.rstrip(",")
 
-    # Remove the trailing comma from the update_query
-    update_query = update_query.rstrip(",")
+            # Add the WHERE clause to specify the user to update
+            update_query += " WHERE id = ?"
+            update_values.append(user_id)
 
-    # Add the WHERE clause to specify the user to update
-    update_query += " WHERE id = ?"
-    update_values.append(user_id)
+            # Execute the update query
+            QueryRun(db, update_query, update_values)
 
-    # Execute the update query
-    QueryRun(db, update_query, update_values)
-
-    return {"message": "User profile updated successfully"}
+            return {"message": "User profile updated successfully"}
 
 # Delete user
 @app.delete("/delete-user/{user_id}", tags=['Authentication'])
