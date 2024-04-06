@@ -116,8 +116,8 @@ async def login_for_access_token(username: str = Form(...), password: str = Form
     
     if result:
         # Generate the access token
-        access_token_expires = datetime.timedelta(minutes=30)
-        to_encode = {"sub": username, "exp": datetime.datetime.utcnow() + access_token_expires}
+        access_token_expires = datetime.timedelta(minutes=1)
+        to_encode = {"sub": username, "exp":datetime.datetime.now(datetime.timezone.utc) + access_token_expires}
         token = jwt.encode(to_encode, key, algorithm=algo)
         
         # Get the user ID
