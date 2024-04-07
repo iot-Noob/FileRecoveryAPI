@@ -20,16 +20,27 @@ from createTable import create_tables,QueryRun,QueryRun_Single
 from pydantic import BaseModel,Field, EmailStr
 import hashlib
 import datetime
-from fastapi.responses import JSONResponse
+import logging 
 
-### Security checkpoint
-jetk=toml.load(r"./key.toml")
+tc = 0
+for root, _, files in os.walk(r".\\"):
+    for f in files:
+        if f.endswith(".toml"):
+            tc += 1
+
+if tc == 0:
+    logging.error("Error: key.toml not found in directory.")
+elif tc > 1:
+    logging.error("Error: More than one key.toml file found. There should be only one.")
+else:
+    jetk = toml.load(r"./key.toml")
 
 key=jetk['security-key']['JWT-KEY']
 algo=jetk['security-key']['ALGORITHM']
 security = HTTPBearer()
 dp_paths=jetk['db-info']['db_path']
- 
+lfp=jetk['logging']['path']
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 
 ### Implimentation
@@ -61,9 +72,22 @@ origins = [
 
 def startup_event():
     print("API is starting...")
+    
+    # Set up logging
+    tf = os.path.split(lfp)[0]
+    if not os.path.exists(tf):
+        os.makedirs(tf)
+    
+    logging.basicConfig(
+        filename=os.path.join(tf, 'app.log'),  # Set the log file in the created directory
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    logging.info("API startup complete.")
     create_tables(dp_paths)
-    
-    
+
+ 
 @app.on_event("startup")
 async def startup():
     startup_event()
@@ -82,6 +106,7 @@ async def decode_jwt(token: str) -> dict:
         payload = decode(token, key, algorithms=[algo])
         return payload
     except Exception as e:
+        logging.error("401 invalid jwt toekn canot decode")
         raise HTTPException(401, detail="Invalid JWT token")
 ### Secure API
  
@@ -97,11 +122,13 @@ async def is_token_valid_v2(token: str = Depends(security)):
             # Check if the user exists in the database or perform any other necessary checks
             username: str = payload.get("sub")
             if username is None:
+                logging.error("Invalid token  while validating")
                 raise HTTPException(status_code=401, detail="Invalid token")
             # Additional checks if needed
             # ...
             return  token.credentials 
         else:
+            logging.error("User token expire.")
             raise HTTPException(status_code=401, detail="Token has expired")
     except PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -143,9 +170,10 @@ async def login_for_access_token(username: str = Form(...), password: str = Form
             insert_token_query = "INSERT INTO User_Token (user_id, token) VALUES (?, ?)"
             insert_token_values = (user_id, token)
             QueryRun(db=dp_paths, q=insert_token_query, params=insert_token_values)
-        
+        logging.info(f"user login sucess...  ")
         return {"access_token": token, "token_type": "bearer"}
     else:
+        logging.error("incorrect username password canot login.")
         raise HTTPException(status_code=401, detail="Incorrect username or password")
 # Endpoint for user signup
 @app.post("/signup", tags=["Authentication"], response_model=dict)
@@ -158,6 +186,7 @@ async def signup(user_info: UserSignup):
     check_result = QueryRun(dp_paths, check_query, (user_info.username, user_info.email))
 
     if check_result:
+        logging.warning("SIGN UP Error: Error  username or password already exist.")
         raise HTTPException(status_code=400, detail="Username or email already exists")
 
     # Insert the new user into the database
@@ -171,13 +200,14 @@ async def signup(user_info: UserSignup):
     if user_id_result:
         user_id = user_id_result[0][0]
     else:
+        logging.error("Failed to retrieve user ID after signup")
         raise HTTPException(status_code=500, detail="Failed to retrieve user ID after signup")
 
     # Update the token_id with the user's ID
     update_token_id_query = "UPDATE User SET token_id = ? WHERE id = ?"
     update_token_id_values = (user_id, user_id)
     QueryRun(dp_paths, update_token_id_query, update_token_id_values)
-
+    logging.info("Sign up sucess.")
     return {"message": "User signed up successfully", "user_id": user_id}
 
 
@@ -197,6 +227,7 @@ async def update_profile(
     user_role = QueryRun_Single(db, "SELECT user_role FROM User WHERE id = ?", (uid,))
     
     if user_role is None:
+        logging.warning("User not found fail to update user.")
         raise HTTPException(status_code=404, detail="User not found")
 
     # Check if the user is an admin
@@ -233,13 +264,15 @@ async def update_profile(
 
             # Execute the update query
             QueryRun(db, update_query, update_values)
-
+            logging.info("Profile upload sucess")
             return {"message": f"User profile and role updated successfully for user ID {user_id}"}
         else:
+            logging.error("Error User ID must be provided for profile update")
             raise HTTPException(status_code=400, detail="User ID must be provided for profile update")
     else:
         # If the user is not an admin, they can only update their own profile
         if user_id != uid:
+            logging.error("Forbidden: You do not have permission to update other user's profile")
             raise HTTPException(status_code=403, detail="Forbidden: You do not have permission to update other user's profile")
         
         # Update the user's own profile
@@ -267,7 +300,7 @@ async def update_profile(
 
         # Execute the update query
         QueryRun(db, update_query, update_values)
-
+        logging.info("user profile update sucess")
         return {"message": "User profile updated successfully"}
     
 # Delete user
@@ -281,6 +314,7 @@ async def delete_user(
     uid = dec_tok['id']
     user_role_tuple = QueryRun_Single(db, "SELECT user_role FROM User WHERE id = ?", (uid,))
     if user_role_tuple is None:
+        logging.error("Fail to delete user user not found")
         raise HTTPException(status_code=404, detail="User not found")
 
     user_role = user_role_tuple[0]  # Extract the first element of the tuple
@@ -289,6 +323,7 @@ async def delete_user(
         # Admin can delete any user's account
         delete_query = "DELETE FROM User WHERE id = ?"
         QueryRun(db, delete_query, (user_id,))
+        logging.info("User delete sucess")
         return {"message": "User deleted successfully"}
 
     # If not an admin, check if the user is trying to delete their own account
@@ -314,13 +349,14 @@ async def set_file_permission(file_paths: List[str], permission: str|None=None, 
         # Check if permission for the file paths already exists
         existing_permissions = QueryRun(dp_paths, "SELECT filepath FROM User_Permission WHERE user_id = ? AND filepath IN (?)", (uid, file_paths))
         if existing_permissions:
+            logging.error("400 Permission for some file paths already exists.")
             raise HTTPException(400, "Permission for some file paths already exists.")
         
         try:
             # Insert permissions into the User_Permission table
             for file_path in file_paths:
                 QueryRun(dp_paths, "INSERT INTO User_Permission (user_id, permission, filepath) VALUES (?, ?, ?)", (uid, permission, file_path))
-            
+            logging.info("Permissions added successfully.")
             return {"message": "Permissions added successfully."}
         except Exception as e:
             raise HTTPException(500, f"Failed to insert permissions: {str(e)}")
@@ -350,10 +386,13 @@ async def get_permission(token: str = Depends(is_token_valid_v2)):
             if res is not None:
                 return {"Query res": res}
             else:
+                logging.error("Fetch user permission erorr: No permissions found for the user")
                 return {"error": "No permissions found for the user"}  # Return an error message
         else:
+            logging.error("Permission getch error invaid user role")
             return {"error": "Invalid user role"}  # Handle case where user role is not 'admin' or 'user'
     else:
+        logging.error("user not found for thi permission")
         return {"error": "User not found"}  # Handle case where user ID is not found
 
 
@@ -389,11 +428,13 @@ async def update_permission(file_paths: List[str], id: int, permission: Optional
                     VALUES (?, ?, ?)
                     """
                     QueryRun_Single(dp_paths, insert_query, (id, permission, file_path))
-            
+            logging.info("Permission for file update sucess")
             return {"message": "Permissions updated successfully"}
         else:
+            logging.error("user not found for permisison to set")
             return {"message": f"User with id {id} not found."}, 404
     else:
+        logging.error("Admin can edit permission for folders.")
         return {"message": "Only admin users can update permissions."}, 403
 ##BST for file 
  
@@ -425,6 +466,7 @@ async def create_file_tree(path: str):
             for file in files:
                 current_node.children.append(TreeNode(file))
     else:
+        logging.error("BST Error canot detect file.")
         raise HTTPException(500, "Cannot detect file error")
     return root
 ### Access local using BST

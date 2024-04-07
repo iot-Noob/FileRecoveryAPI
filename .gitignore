@@ -12,3 +12,5 @@ DbMs.py
 *.bat
 *.sh
 *.docx
+*.log
+logging
