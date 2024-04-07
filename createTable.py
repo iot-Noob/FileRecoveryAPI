@@ -29,7 +29,7 @@ def create_tables(db_file):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INT,
         permission VARCHAR(100) NOT NULL,
-        filepath VARCHAR(255) NOT NULL,
+        filepath VARCHAR(255) NOT NULL UNIQUE,
         FOREIGN KEY (user_id) REFERENCES User(id)
     )
     """

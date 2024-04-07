@@ -300,6 +300,37 @@ async def delete_user(
     QueryRun(db, delete_query, (uid,))
     return {"message": "Your account has been deleted successfully"}
 
+### Set File permission for user that user can access
+
+### Add permission
+@app.post("/add_filepath_permission", tags=['UserFileAccess'], name="File Permission", description="Set file read, write, update, delete, and download permissions")
+async def set_file_permission(file_paths: List[str], permission: str, token: str = Depends(is_token_valid_v2)):
+    dec_tok = await decode_jwt(token=token)
+    uid = dec_tok['id']
+    
+    # Check if the user is an admin
+    user_role_tuple = QueryRun_Single(dp_paths, "SELECT user_role FROM User WHERE id = ?", (uid,))
+    if user_role_tuple[0] == "admin":
+        # Check if permission for the file paths already exists
+        existing_permissions = QueryRun(dp_paths, "SELECT filepath FROM User_Permission WHERE user_id = ? AND filepath IN (?)", (uid, file_paths))
+        if existing_permissions:
+            raise HTTPException(400, "Permission for some file paths already exists.")
+        
+        try:
+            # Insert permissions into the User_Permission table
+            for file_path in file_paths:
+                QueryRun(dp_paths, "INSERT INTO User_Permission (user_id, permission, filepath) VALUES (?, ?, ?)", (uid, permission, file_path))
+            
+            return {"message": "Permissions added successfully."}
+        except Exception as e:
+            raise HTTPException(500, f"Failed to insert permissions: {str(e)}")
+      
+    else:
+        raise HTTPException(403, "Only admins are allowed to change permissions.")
+### Edit permission\
+
+
+
 ##BST for file 
  
 class TreeNode:
@@ -357,18 +388,30 @@ async def search_simple(path: str = Query(...),token: str = Depends(is_token_val
      
 ### Download file
 @app.get("/download-file/", tags=["Local-File"], name="Download File")
-async def download_file(file_path: str,token: str = Depends(is_token_valid_v2)):
-    """
-    Download a file from the binary tree file system.
+async def download_file(file_path: str, token: str = Depends(is_token_valid_v2)):
+    dec_tok = await decode_jwt(token=token)
+    uid = dec_tok['id']
+    user_role_tuple = QueryRun_Single(dp_paths, "SELECT user_role FROM User WHERE id = ?", (uid,))
 
-    :param file_path: The path to the file relative to the root of the file system.
-    """
-    # Check if the file path exists in the file system
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    if user_role_tuple:
+        user_role = user_role_tuple[0]  # Extract the role from the tuple
+        if user_role == "admin" or user_role == "user":
+            """
+            Download a file from the binary tree file system.
 
-    # Return the file as a response
-    return  Response(file_path)
+            :param file_path: The path to the file relative to the root of the file system.
+            """
+            # Check if the file path exists in the file system
+            if not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail="File not found")
+
+            # Return the file as a response
+            return FileResponse(file_path)
+        else:
+            raise HTTPException(status_code=403, detail="Access denied: You do not have permission to download files")
+    else:
+        raise HTTPException(status_code=500, detail="Failed to fetch user role from the database")
+
 ## List local dirs
 
 @app.get("/list_dirs", tags=["Local-File"],name="Directory List") 
