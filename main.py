@@ -304,7 +304,7 @@ async def delete_user(
 
 ### Add permission
 @app.post("/add_filepath_permission", tags=['UserFileAccess'], name="File Permission", description="Set file read, write, update, delete, and download permissions")
-async def set_file_permission(file_paths: List[str], permission: str, token: str = Depends(is_token_valid_v2)):
+async def set_file_permission(file_paths: List[str], permission: str|None=None, token: str = Depends(is_token_valid_v2)):
     dec_tok = await decode_jwt(token=token)
     uid = dec_tok['id']
     
@@ -327,10 +327,74 @@ async def set_file_permission(file_paths: List[str], permission: str, token: str
       
     else:
         raise HTTPException(403, "Only admins are allowed to change permissions.")
+
+## Get Permsission:
+@app.get("/get_user_permission", tags=['UserFileAccess'], name="Get permission for current user")
+async def get_permission(token: str = Depends(is_token_valid_v2)):
+    dec_tok = await decode_jwt(token=token)
+    gcid = dec_tok['id']
+    user_role_tuple = QueryRun_Single(dp_paths, "SELECT user_role FROM User WHERE id = ?", (gcid,))
+    
+    if user_role_tuple:
+        user_role = user_role_tuple[0]
+        if user_role in ("admin", "user"):
+            query = """
+                SELECT User_Permission.id, User_Permission.filepath, User_Permission.permission
+                FROM User
+                JOIN User_Permission ON User.id = User_Permission.user_id
+                WHERE User.id = ?
+            """
+            res = QueryRun(dp_paths, query, (gcid,))
+            
+            # If there are results, return them, otherwise return an empty list
+            if res is not None:
+                return {"Query res": res}
+            else:
+                return {"error": "No permissions found for the user"}  # Return an error message
+        else:
+            return {"error": "Invalid user role"}  # Handle case where user role is not 'admin' or 'user'
+    else:
+        return {"error": "User not found"}  # Handle case where user ID is not found
+
+
+
 ### Edit permission\
 
-
-
+@app.patch("/edit_permissions", tags=['UserFileAccess'], name="User edit permission")
+async def update_permission(file_paths: List[str], id: int, permission: Optional[str] = None, token: str = Depends(is_token_valid_v2)):
+    dec_tok = await decode_jwt(token=token)
+    gcid = dec_tok['id']
+    user_role_tuple = QueryRun_Single(dp_paths, "SELECT user_role FROM User WHERE id = ?", (gcid,))
+    
+    if user_role_tuple and user_role_tuple[0] == "admin":
+        # Check if user with provided id exists
+        user_exists = QueryRun_Single(dp_paths, "SELECT id FROM User WHERE id = ?", (id,))
+        if user_exists:
+            # Update permissions for each file path individually
+            for file_path in file_paths:
+                # Check if the permission for the file path already exists
+                existing_permission = QueryRun_Single(dp_paths, "SELECT permission FROM User_Permission WHERE user_id = ? AND filepath = ?", (id, file_path))
+                if existing_permission:
+                    # Permission already exists, update it
+                    update_query = """
+                    UPDATE User_Permission
+                    SET permission = ?
+                    WHERE user_id = ? AND filepath = ?
+                    """
+                    QueryRun_Single(dp_paths, update_query, (permission, id, file_path))
+                else:
+                    # Permission doesn't exist, insert a new row
+                    insert_query = """
+                    INSERT INTO User_Permission (user_id, permission, filepath)
+                    VALUES (?, ?, ?)
+                    """
+                    QueryRun_Single(dp_paths, insert_query, (id, permission, file_path))
+            
+            return {"message": "Permissions updated successfully"}
+        else:
+            return {"message": f"User with id {id} not found."}, 404
+    else:
+        return {"message": "Only admin users can update permissions."}, 403
 ##BST for file 
  
 class TreeNode:
