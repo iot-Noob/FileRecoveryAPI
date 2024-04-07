@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI,File,HTTPException,UploadFile,Query,Form,Depends ,Form, HTTPException
+from fastapi import FastAPI,File,HTTPException,UploadFile,Query,Form,Depends ,Form, HTTPException,Path
 from fastapi.responses import FileResponse,Response,HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 # from fs.osfs import OSFS
@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # from ftplib import FTP_TLS
 # from smb.SMBConnection import SMBConnection
 import pydantic
-from typing import List 
+from typing import List ,Optional
 import psutil
 import shutil
 import jwt
@@ -16,7 +16,7 @@ from jwt import PyJWTError
 from fastapi.security import HTTPBearer,OAuth2PasswordBearer
 import toml
 import sqlite3
-from createTable import create_tables,QueryRun
+from createTable import create_tables,QueryRun,QueryRun_Single
 from pydantic import BaseModel,Field, EmailStr
 import hashlib
 import datetime
@@ -83,8 +83,6 @@ async def decode_jwt(token: str) -> dict:
         return payload
     except Exception as e:
         raise HTTPException(401, detail="Invalid JWT token")
-    
-
 ### Secure API
  
 def hash_password(password):
@@ -102,7 +100,7 @@ async def is_token_valid_v2(token: str = Depends(security)):
                 raise HTTPException(status_code=401, detail="Invalid token")
             # Additional checks if needed
             # ...
-            return  token
+            return  token.credentials 
         else:
             raise HTTPException(status_code=401, detail="Token has expired")
     except PyJWTError:
@@ -110,7 +108,10 @@ async def is_token_valid_v2(token: str = Depends(security)):
  
  
 ### Login
-@app.post("/token", tags=['Authentication'])
+def get_db():
+    return dp_paths 
+ 
+@app.post("/Login", tags=['Authentication'],name="Login Account",description="Login to get token")
 async def login_for_access_token(username: str = Form(...), password: str = Form(...)):
     # Hash the provided password
     hashed_password = hash_password(password)
@@ -120,43 +121,33 @@ async def login_for_access_token(username: str = Form(...), password: str = Form
     result = QueryRun(db=dp_paths, q=query, params=(username, hashed_password))
     
     if result:
+        # Extract user ID from the database result
+        user_id = result[0][0]
+
         # Generate the access token
         access_token_expires = datetime.timedelta(minutes=30)
-        to_encode = {"sub": username, "exp": datetime.datetime.now(datetime.timezone.utc) + access_token_expires}
+        to_encode = {"sub": username, "id": user_id, "exp": datetime.datetime.now(datetime.timezone.utc) + access_token_expires}
         token = jwt.encode(to_encode, key, algorithm=algo)
         
-        # Get the user ID
-        quid = "SELECT id FROM User WHERE username=?"
-        ap = (username,)
-        cid_result = QueryRun(db=dp_paths, q=quid, params=ap)
+        # Check if the user ID exists in User_Token table
+        check_token_query = "SELECT id FROM User_Token WHERE user_id = ?"
+        check_token_result = QueryRun(db=dp_paths, q=check_token_query, params=(user_id,))
         
-        if cid_result:
-            cid = cid_result[0][0]  # Extract user ID from the result
-            
-            # Check if the user ID exists in User_Token table
-            check_token_query = "SELECT id FROM User_Token WHERE user_id = ?"
-            check_token_result = QueryRun(db=dp_paths, q=check_token_query, params=(cid,))
-            
-            if check_token_result:
-                # Update the token
-                update_token_query = "UPDATE User_Token SET token = ? WHERE user_id = ?"
-                update_token_values = (token, cid)
-                QueryRun(db=dp_paths, q=update_token_query, params=update_token_values)
-            else:
-                # Insert a new token for the user
-                insert_token_query = "INSERT INTO User_Token (user_id, token) VALUES (?, ?)"
-                insert_token_values = (cid, token)
-                QueryRun(db=dp_paths, q=insert_token_query, params=insert_token_values)
-            
-            return {"access_token": token, "token_type": "bearer"}
+        if check_token_result:
+            # Update the token
+            update_token_query = "UPDATE User_Token SET token = ? WHERE user_id = ?"
+            update_token_values = (token, user_id)
+            QueryRun(db=dp_paths, q=update_token_query, params=update_token_values)
         else:
-            raise HTTPException(status_code=500, detail="Failed to retrieve user ID")
+            # Insert a new token for the user
+            insert_token_query = "INSERT INTO User_Token (user_id, token) VALUES (?, ?)"
+            insert_token_values = (user_id, token)
+            QueryRun(db=dp_paths, q=insert_token_query, params=insert_token_values)
+        
+        return {"access_token": token, "token_type": "bearer"}
     else:
         raise HTTPException(status_code=401, detail="Incorrect username or password")
- 
-
 # Endpoint for user signup
- #test
 @app.post("/signup", tags=["Authentication"], response_model=dict)
 async def signup(user_info: UserSignup):
     # Hash the provided password before storing it
@@ -191,20 +182,23 @@ async def signup(user_info: UserSignup):
 
 
 ## Update user
+## Update user
 def get_db():
     return dp_paths 
-@app.patch("/update-profile/{user_id}",tags=['Authentication'])
+@app.patch("/update-profile/{user_id}", tags=['Authentication'])
 async def update_profile(
-    user_id: int, 
     new_username: str = Form(None),
     new_password: str = Form(None),
     new_email: str = Form(None),
     db: sqlite3.Connection = Depends(get_db),
     token: str = Depends(is_token_valid_v2)  # Use Depends to inject the database connection
 ):  
+    dec_tok = await decode_jwt(token=token)
+    uid=dec_tok['id']
+    gcur = QueryRun(db, "SELECT user_role FROM User WHERE id = ?", (uid,))
     # Check if the user exists in the database
     user_query = "SELECT * FROM User WHERE id = ?"
-    user_result = QueryRun(db, user_query, (user_id,))
+    user_result = QueryRun(db, user_query, (uid,))
     if not user_result:
         raise HTTPException(status_code=404, detail="User not found")
     # Update the user profile fields if new values are provided
@@ -228,31 +222,42 @@ async def update_profile(
 
     # Add the WHERE clause to specify the user to update
     update_query += " WHERE id = ?"
-    update_values.append(user_id)
+    update_values.append(dec_tok['id'])  # Append decoded user ID here
 
     # Execute the update query
     QueryRun(db, update_query, update_values)
 
     return {"message": "User profile updated successfully"}
-
 # Delete user
 @app.delete("/delete-user/{user_id}", tags=['Authentication'])
 async def delete_user(
-    user_id: int,
-    db: sqlite3.Connection = Depends(get_db),
+    user_id:Optional[int]=None,
+    db: str = Depends(get_db),
     token: str = Depends(is_token_valid_v2)
-):
-    # Check if the user exists in the database
-    user_query = "SELECT * FROM User WHERE id = ?"
-    user_result = QueryRun(db, user_query, (user_id,))
-    if not user_result:
+):  
+    dec_tok = await decode_jwt(token=token)
+    uid = dec_tok['id']
+    user_role_tuple = QueryRun_Single(db, "SELECT user_role FROM User WHERE id = ?", (uid,))
+    if user_role_tuple is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Delete the user from the database
-    delete_query = "DELETE FROM User WHERE id = ?"
-    QueryRun(db, delete_query, (user_id,))
+    user_role = user_role_tuple[0]  # Extract the first element of the tuple
+    # Check if the user is an admin
+    if user_role == 'admin':
+        # Admin can delete any user's account
+        delete_query = "DELETE FROM User WHERE id = ?"
+        QueryRun(db, delete_query, (user_id,))
+        return {"message": "User deleted successfully"}
 
-    return {"message": "User deleted successfully"}
+    # If not an admin, check if the user is trying to delete their own account
+    if user_id != uid:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not have permission to delete this user")
+
+    # Delete the user's own account
+    delete_query = "DELETE FROM User WHERE id = ?"
+    QueryRun(db, delete_query, (uid,))
+    return {"message": "Your account has been deleted successfully"}
+
 ##BST for file 
  
 class TreeNode:

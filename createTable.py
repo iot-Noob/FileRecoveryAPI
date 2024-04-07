@@ -1,4 +1,5 @@
 import sqlite3
+from typing import Union
 def create_tables(db_file):
     """Creates the 'User' and 'User_Permission' tables in the specified SQLite database file.
 
@@ -67,5 +68,20 @@ def QueryRun(db: str, q: str, params: tuple = ()) -> list:
     except sqlite3.Error as error:
         print(f"Error executing query: {error}")
         return []
+    finally:
+        conn.close()
+
+def QueryRun_Single(db: str, q: str, params: tuple = ()) -> Union[tuple, None]:
+    conn = sqlite3.connect(db)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute(q, params)
+        result = cursor.fetchone()  # Fetch a single row
+        conn.commit()
+        return result  # Return the single row or None if no row is found
+    except sqlite3.Error as error:
+        print(f"Error executing query: {error}")
+        return None
     finally:
         conn.close()
