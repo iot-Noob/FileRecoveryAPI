@@ -182,52 +182,94 @@ async def signup(user_info: UserSignup):
 
 
 ## Update user
-## Update user
-def get_db():
-    return dp_paths 
 @app.patch("/update-profile/{user_id}", tags=['Authentication'])
 async def update_profile(
-    new_username: str = Form(None),
-    new_password: str = Form(None),
-    new_email: str = Form(None),
+    user_id: int,
+    new_username: Optional[str] = Form(None),
+    new_password: Optional[str] = Form(None),
+    new_email: Optional[str] = Form(None),
+    role: Optional[str] = Form(None),
     db: sqlite3.Connection = Depends(get_db),
-    token: str = Depends(is_token_valid_v2)  # Use Depends to inject the database connection
+    token: str = Depends(is_token_valid_v2)
 ):  
     dec_tok = await decode_jwt(token=token)
-    uid=dec_tok['id']
-    gcur = QueryRun(db, "SELECT user_role FROM User WHERE id = ?", (uid,))
-    # Check if the user exists in the database
-    user_query = "SELECT * FROM User WHERE id = ?"
-    user_result = QueryRun(db, user_query, (uid,))
-    if not user_result:
+    uid = dec_tok['id']
+    user_role = QueryRun_Single(db, "SELECT user_role FROM User WHERE id = ?", (uid,))
+    
+    if user_role is None:
         raise HTTPException(status_code=404, detail="User not found")
-    # Update the user profile fields if new values are provided
-    update_query = "UPDATE User SET"
-    update_values = []
 
-    if new_username:
-        update_query += " username = ?,"
-        update_values.append(new_username)
+    # Check if the user is an admin
+    if user_role[0] == 'admin':
+        # Admin can update user profiles and roles
+        # If user_id is provided, update the profile and role of that user
+        if user_id:
+            # Update the user profile fields if new values are provided
+            update_query = "UPDATE User SET"
+            update_values = []
 
-    if new_password:
-        update_query += " password = ?,"
-        update_values.append(new_password)
+            if new_username:
+                update_query += " username = ?,"
+                update_values.append(new_username)
 
-    if new_email:
-        update_query += " email = ?,"
-        update_values.append(new_email)
+            if new_password:
+                update_query += " password = ?,"
+                update_values.append(new_password)
 
-    # Remove the trailing comma from the update_query
-    update_query = update_query.rstrip(",")
+            if new_email:
+                update_query += " email = ?,"
+                update_values.append(new_email)
 
-    # Add the WHERE clause to specify the user to update
-    update_query += " WHERE id = ?"
-    update_values.append(dec_tok['id'])  # Append decoded user ID here
+            if role:
+                update_query += " user_role = ?,"
+                update_values.append(role)
 
-    # Execute the update query
-    QueryRun(db, update_query, update_values)
+            # Remove the trailing comma from the update_query
+            update_query = update_query.rstrip(",")
 
-    return {"message": "User profile updated successfully"}
+            # Add the WHERE clause to specify the user to update
+            update_query += " WHERE id = ?"
+            update_values.append(user_id)
+
+            # Execute the update query
+            QueryRun(db, update_query, update_values)
+
+            return {"message": f"User profile and role updated successfully for user ID {user_id}"}
+        else:
+            raise HTTPException(status_code=400, detail="User ID must be provided for profile update")
+    else:
+        # If the user is not an admin, they can only update their own profile
+        if user_id != uid:
+            raise HTTPException(status_code=403, detail="Forbidden: You do not have permission to update other user's profile")
+        
+        # Update the user's own profile
+        update_query = "UPDATE User SET"
+        update_values = []
+
+        if new_username:
+            update_query += " username = ?,"
+            update_values.append(new_username)
+
+        if new_password:
+            update_query += " password = ?,"
+            update_values.append(new_password)
+
+        if new_email:
+            update_query += " email = ?,"
+            update_values.append(new_email)
+
+        # Remove the trailing comma from the update_query
+        update_query = update_query.rstrip(",")
+
+        # Add the WHERE clause to specify the user to update
+        update_query += " WHERE id = ?"
+        update_values.append(uid)
+
+        # Execute the update query
+        QueryRun(db, update_query, update_values)
+
+        return {"message": "User profile updated successfully"}
+    
 # Delete user
 @app.delete("/delete-user/{user_id}", tags=['Authentication'])
 async def delete_user(
