@@ -470,52 +470,8 @@ async def create_file_tree(path: str):
         raise HTTPException(500, "Cannot detect file error")
     return root
 
-def bfs_search(root_path, file_name):
-    queue = [root_path]
-    while queue:
-        current_path = queue.pop(0)
-        try:
-            for item in os.listdir(current_path):
-                item_path = os.path.join(current_path, item)
-                if os.path.isdir(item_path):
-                    queue.append(item_path)
-                elif os.path.isfile(item_path) and file_name in item:
-                    return item_path
-        except Exception as e:
-            print(f"Error accessing path {current_path}: {e}")
-    return None
-
-def dfs_search(current_path, file_name):
-    try:
-        for item in os.listdir(current_path):
-            item_path = os.path.join(current_path, item)
-            if os.path.isdir(item_path):
-                result = dfs_search(item_path, file_name)
-                if result:
-                    return result
-            elif os.path.isfile(item_path) and file_name in item:
-                return item_path
-    except Exception as e:
-        print(f"Error accessing path {current_path}: {e}")
-    return None
 
 # FastAPI Endpoints
-
-@app.get("/search-file-bfs/",tags=['File search'],name='Search file with BFS')
-async def search_file_bfs(root_path: str = Query(...), file_name: str = Query(...),token:str=Depends(is_token_valid_v2)):
-    file_path = bfs_search(root_path, file_name)
-    if file_path:
-        return {"file_path": file_path}
-    else:
-        return {"message": "File not found"}
-
-@app.get("/search-file-dfs/",tags=['File search'],name='Search file with DFS')
-async def search_file_dfs(root_path: str = Query(...), file_name: str = Query(...),token:str=Depends(is_token_valid_v2)):
-    file_path = dfs_search(root_path, file_name)
-    if file_path:
-        return {"file_path": file_path}
-    else:
-        return {"message": "File not found"}
 
 ### Access local using BST
 @app.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
