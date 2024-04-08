@@ -322,40 +322,8 @@ async def update_permission(file_paths: List[str], id: int, permission: Optional
         return {"message": "Only admin users can update permissions."}, 403
 ##BST for file 
  
-class TreeNode:
-    def __init__(self, name):
-        self.name = name
-        self.children = []
-async def create_file_tree(path: str):
-    root = TreeNode(path)
-    if os.path.exists(path):
-        for root_dir, folders, files in os.walk(path):
-            current_node = root
-            # Split the path to get each directory level
-            dirs = root_dir.split(os.sep)[1:]
-            for d in dirs:
-                found = False
-                # Check if the directory already exists as a child
-                for child in current_node.children:
-                    if child.name == d:
-                        current_node = child
-                        found = True
-                        break
-                # If not found, create a new node
-                if not found:
-                    new_node = TreeNode(d)
-                    current_node.children.append(new_node)
-                    current_node = new_node
-            # Add files as children of the leaf node
-            for file in files:
-                current_node.children.append(TreeNode(file))
-    else:
-        logging.error("BST Error canot detect file.")
-        raise HTTPException(500, "Cannot detect file error")
-    return root
 
-
-# FastAPI Endpoints
+ 
 
 ### Access local using BST
 @BasicRouter.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
