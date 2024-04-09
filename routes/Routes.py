@@ -219,11 +219,11 @@ async def delete_user(
     QueryRun(db, delete_query, (uid,))
     return {"message": "Your account has been deleted successfully"}
 
-### Set File permission for user that user can access
-
+ 
+    
 ### Add permission
 @BasicRouter.post("/add_filepath_permission", tags=['UserFileAccess'], name="File Permission", description="Set file read, write, update, delete, and download permissions")
-async def set_file_permission(file_paths: List[str], permission: str|None=None, token: str = Depends(is_token_valid_v2)):
+async def set_file_permission(file_paths: List[str], permission: str|None=None,blacklist:str|None=None,whitelist:str|None=None, token: str = Depends(is_token_valid_v2),user_id:int|None=None):
     dec_tok = await decode_jwt(token=token)
     uid = dec_tok['id']
     
@@ -239,14 +239,24 @@ async def set_file_permission(file_paths: List[str], permission: str|None=None, 
         try:
             # Insert permissions into the User_Permission table
             for file_path in file_paths:
-                QueryRun(dp_paths, "INSERT INTO User_Permission (user_id, permission, filepath) VALUES (?, ?, ?)", (uid, permission, file_path))
+                if user_id is None:
+                    # If user_id is not provided, use the token's user_id
+                    user_id = uid
+
+                # Check if the user exists
+                user_exists = QueryRun_Single(dp_paths, "SELECT COUNT(*) FROM User WHERE id = ?", (user_id,))
+                if user_exists[0] == 0:
+                    logging.error("Error inserting user by id, user not found.")
+                    raise HTTPException(status_code=404, detail="User not found.")
+
+                # Insert permission into the User_Permission table
+                QueryRun(dp_paths, "INSERT INTO User_Permission (user_id, permission, filepath, whitelist, blacklist) VALUES (?, ?, ?, ?, ?)", (user_id, permission, file_path, whitelist, blacklist))
+
             logging.info("Permissions added successfully.")
             return {"message": "Permissions added successfully."}
         except Exception as e:
-            raise HTTPException(500, f"Failed to insert permissions: {str(e)}")
-      
-    else:
-        raise HTTPException(403, "Only admins are allowed to change permissions.")
+            raise HTTPException(status_code=500, detail=f"Failed to insert permissions: {str(e)}")
+
 
 ## Get Permsission:
 @BasicRouter.get("/get_user_permission", tags=['UserFileAccess'], name="Get permission for current user")
@@ -259,7 +269,8 @@ async def get_permission(token: str = Depends(is_token_valid_v2)):
         user_role = user_role_tuple[0]
         if user_role in ("admin", "user"):
             query = """
-                SELECT User_Permission.id, User_Permission.filepath, User_Permission.permission
+                SELECT User_Permission.id, User_Permission.filepath, User_Permission.permission,User_Permission.blacklist,
+                User_Permission.whitelist
                 FROM User
                 JOIN User_Permission ON User.id = User_Permission.user_id
                 WHERE User.id = ?
@@ -284,7 +295,7 @@ async def get_permission(token: str = Depends(is_token_valid_v2)):
 ### Edit permission\
 
 @BasicRouter.patch("/edit_permissions", tags=['UserFileAccess'], name="User edit permission")
-async def update_permission(file_paths: List[str], id: int, permission: Optional[str] = None, token: str = Depends(is_token_valid_v2)):
+async def update_permission(file_paths: List[str], id: int, permission: Optional[str] = None, token: str = Depends(is_token_valid_v2),whitelist:str|None=None, blacklist:str|None=None):
     dec_tok = await decode_jwt(token=token)
     gcid = dec_tok['id']
     user_role_tuple = QueryRun_Single(dp_paths, "SELECT user_role FROM User WHERE id = ?", (gcid,))
@@ -308,10 +319,10 @@ async def update_permission(file_paths: List[str], id: int, permission: Optional
                 else:
                     # Permission doesn't exist, insert a new row
                     insert_query = """
-                    INSERT INTO User_Permission (user_id, permission, filepath)
-                    VALUES (?, ?, ?)
+                    INSERT INTO User_Permission (user_id, permission, filepath,whitelist,blacklist)
+                    VALUES (?, ?, ?,?,?)
                     """
-                    QueryRun_Single(dp_paths, insert_query, (id, permission, file_path))
+                    QueryRun_Single(dp_paths, insert_query, (id, permission, file_path,whitelist,blacklist))
             logging.info("Permission for file update sucess")
             return {"message": "Permissions updated successfully"}
         else:
@@ -320,16 +331,30 @@ async def update_permission(file_paths: List[str], id: int, permission: Optional
     else:
         logging.error("Admin can edit permission for folders.")
         return {"message": "Only admin users can update permissions."}, 403
-##BST for file 
- 
-
- 
 
 ### Access local using BST
 @BasicRouter.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
-async def create_file_tree_endpoint(path: str,token: str = Depends(is_token_valid_v2)):
-    return await create_file_tree(path)
+async def create_file_tree_endpoint(path: str, token: str = Depends(is_token_valid_v2)):
+    uid = await decode_jwt(token=token)
+    cuid = uid['id']
+    permission_tuple = QueryRun(dp_paths, "SELECT permission FROM User_Permission WHERE user_id = ? AND filepath = ?", (cuid, path))
 
+    if permission_tuple:
+        # Extract the permission string from the tuple
+        permission_string = permission_tuple[0][0]  # Extracting the string from the tuple
+        
+        # Check if 'read' permission is present in the permission string
+        if 'read' in permission_string.split(','):
+            return await create_file_tree(path)
+        else:
+            logging.error("Error access file via BST: No read permission")
+            raise HTTPException(403, "You don't have read permission to access this file.")
+    else:
+        logging.error("Error access file via BST: No permission found")
+        raise HTTPException(404, "You don't have permission to access this file.")
+
+
+ 
 async def get_directory_structure(path):
     structure = {"name": os.path.basename(path)}
     try:
@@ -354,7 +379,7 @@ async def download_file(file_path: str, token: str = Depends(is_token_valid_v2))
     dec_tok = await decode_jwt(token=token)
     uid = dec_tok['id']
     user_role_tuple = QueryRun_Single(dp_paths, "SELECT user_role FROM User WHERE id = ?", (uid,))
-
+    
     if user_role_tuple:
         user_role = user_role_tuple[0]  # Extract the role from the tuple
         if user_role == "admin" or user_role == "user":

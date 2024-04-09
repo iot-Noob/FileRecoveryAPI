@@ -2,13 +2,28 @@ from utils.ImportLib import  *
 from config.Conf_Import import *
 from routes.Routes import BasicRouter
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
-
-### Implimentation
-
-
-
 ### Start of Fastapi
+"""
+Read: Allows users to view the contents of the file.
 
+Write: Allows users to modify the contents of the file.
+
+Execute: Allows users to execute the file, which might be relevant for executable files or scripts.
+
+Delete: Allows users to delete the file.
+
+Create: Allows users to create new files within the directory.
+
+Modify permissions: Allows users to change the permissions of the file (grant or revoke access to other users).
+
+Share: Allows users to share the file with other users.
+
+Download: Allows users to download the file from the server.
+
+Upload: Allows users to upload new files to the server.
+
+Move: Allows users to move the file to a different directory.
+"""
 app = FastAPI(title="File Recovery API ")
 
 origins = [
@@ -52,3 +67,4 @@ app.add_middleware(
 )
 
 app.include_router(BasicRouter)
+

@@ -29,11 +29,14 @@ def create_tables(db_file):
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INT,
         permission VARCHAR(100) NOT NULL,
-        filepath VARCHAR(255) NOT NULL UNIQUE,
+        filepath VARCHAR(255) NOT NULL,
+        blacklist VARCHAR(255),
+        whitelist VARCHAR(255),
         FOREIGN KEY (user_id) REFERENCES User(id)
+ 
     )
     """
-
+ 
     user_token_table = """
     CREATE TABLE IF NOT EXISTS User_Token (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +45,7 @@ def create_tables(db_file):
         FOREIGN KEY (user_id) REFERENCES User(id)
     )
     """
-
+ 
 
     try:
         cursor.execute(user_table)
