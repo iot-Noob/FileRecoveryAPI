@@ -333,45 +333,51 @@ async def update_permission(file_paths: List[str], id: int, permission: Optional
         return {"message": "Only admin users can update permissions."}, 403
 
 ### Access local using BST
-@BasicRouter.get("/local-file", tags=["Local-File"],name="Binary tree File system ",description="Won't accept Entire disk may stuck. \n\n Donot enter disk letter insted pass file path like d:/folder")
+@BasicRouter.get("/local-file", tags=["Local-File"], name="Binary tree File system", description="Won't accept Entire disk may stuck. \n\nDonot enter disk letter insted pass file path like d:/folder")
 async def create_file_tree_endpoint(path: str, token: str = Depends(is_token_valid_v2)):
     uid = await decode_jwt(token=token)
     cuid = uid['id']
-    permission_tuple = QueryRun(dp_paths, "SELECT permission FROM User_Permission WHERE user_id = ? AND filepath = ?", (cuid, path))
-
+    permission_tuple = QueryRun(dp_paths, "SELECT permission, blacklist, whitelist FROM User_Permission WHERE user_id = ? AND filepath = ?", (cuid, path))
+    
     if permission_tuple:
         # Extract the permission string from the tuple
         permission_string = permission_tuple[0][0]  # Extracting the string from the tuple
-        
+        blist = permission_tuple[0][1].split(',') if permission_tuple[0][1] else []  ## extract blacklist form table and split by comma
+        wlist = permission_tuple[0][2].split(',') if permission_tuple[0][2] else []  ## extract whitelist form table and split by comma
+
         # Check if 'read' permission is present in the permission string
         if 'read' in permission_string.split(','):
-            return await create_file_tree(path)
+            # Await the result of the async function here
+            file_tree = await create_file_tree(path, blist, wlist)
+            return file_tree
         else:
             logging.error("Error access file via BST: No read permission")
             raise HTTPException(403, "You don't have read permission to access this file.")
     else:
         logging.error("Error access file via BST: No permission found")
         raise HTTPException(404, "You don't have permission to access this file.")
-
-
  
-async def get_directory_structure(path):
-    structure = {"name": os.path.basename(path)}
-    try:
-        if os.path.isdir(path):
-            structure["children"] = [await get_directory_structure(os.path.join(path, child)) for child in os.listdir(path)]
-        else:
-            structure["children"] = []
-    except PermissionError:
-        structure["children"] = []
-    return structure
+
 
 @BasicRouter.get("/local-simpSearch", tags=["Local-File"], description="Search file using Simple method")
-async def search_simple(path: str = Query(...),token: str = Depends(is_token_valid_v2)):
-    if os.path.exists(path):
-        return await get_directory_structure(path)
+async def search_simple(path: str = Query(...), token: str = Depends(is_token_valid_v2)):
+    uid = await decode_jwt(token=token)
+    cuid = uid['id']
+    permission_tuple = QueryRun(dp_paths, "SELECT permission, blacklist, whitelist FROM User_Permission WHERE user_id = ? AND filepath = ?", (cuid, path))
+    if permission_tuple:
+        permission_string = permission_tuple[0][0]  # Extracting the string from the tuple
+        blist = permission_tuple[0][1].split(',') if permission_tuple[0][1] else []  ## extract blacklist form table and split by comma
+        wlist = permission_tuple[0][2].split(',') if permission_tuple[0][2] else []  ## extract whitelist form table and split by comma
+        
+        if 'read' in permission_string.split(','):
+            if os.path.exists(path):
+                return await get_directory_structure(path, blist, wlist)
+            else:
+                logging.error("File path doesn't exist. Simple search failed.")
+                raise HTTPException(404, f"File path doesn't exist: '{path}'")
     else:
-        raise HTTPException(404, f"File path doesn't exist: '{path}'")
+        logging.error("Error! Cannot access simple search folder. Ask admin to give you access.")
+        raise HTTPException(501, "Error: Simple search - you don't have permission to read the file. Ask admin.")
      
 ### Download file
 @BasicRouter.get("/download-file/", tags=["Local-File"], name="Download File")
