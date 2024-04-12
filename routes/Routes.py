@@ -338,16 +338,12 @@ async def create_file_tree_endpoint(path: str, token: str = Depends(is_token_val
     uid = await decode_jwt(token=token)
     cuid = uid['id']
     permission_tuple = QueryRun(dp_paths, "SELECT permission, blacklist, whitelist FROM User_Permission WHERE user_id = ? AND filepath = ?", (cuid, path))
-    
-    if permission_tuple:
-        # Extract the permission string from the tuple
-        permission_string = permission_tuple[0][0]  # Extracting the string from the tuple
-        blist = permission_tuple[0][1].split(',') if permission_tuple[0][1] else []  ## extract blacklist form table and split by comma
-        wlist = permission_tuple[0][2].split(',') if permission_tuple[0][2] else []  ## extract whitelist form table and split by comma
 
-        # Check if 'read' permission is present in the permission string
+    if permission_tuple:
+        permission_string = permission_tuple[0][0]  
+        blist = permission_tuple[0][1].split(',') if permission_tuple[0][1] else []  
+        wlist = permission_tuple[0][2].split(',') if permission_tuple[0][2] else []  
         if 'read' in permission_string.split(','):
-            # Await the result of the async function here
             file_tree = await create_file_tree(path, blist, wlist)
             return file_tree
         else:
@@ -356,28 +352,29 @@ async def create_file_tree_endpoint(path: str, token: str = Depends(is_token_val
     else:
         logging.error("Error access file via BST: No permission found")
         raise HTTPException(404, "You don't have permission to access this file.")
- 
-
 
 @BasicRouter.get("/local-simpSearch", tags=["Local-File"], description="Search file using Simple method")
 async def search_simple(path: str = Query(...), token: str = Depends(is_token_valid_v2)):
     uid = await decode_jwt(token=token)
     cuid = uid['id']
     permission_tuple = QueryRun(dp_paths, "SELECT permission, blacklist, whitelist FROM User_Permission WHERE user_id = ? AND filepath = ?", (cuid, path))
-    if permission_tuple:
-        permission_string = permission_tuple[0][0]  # Extracting the string from the tuple
-        blist = permission_tuple[0][1].split(',') if permission_tuple[0][1] else []  ## extract blacklist form table and split by comma
-        wlist = permission_tuple[0][2].split(',') if permission_tuple[0][2] else []  ## extract whitelist form table and split by comma
+
         
-        if 'read' in permission_string.split(','):
-            if os.path.exists(path):
+    
+    if os.path.exists(path):
+        if permission_tuple:
+            permission_string = permission_tuple[0][0]   
+            blist = permission_tuple[0][1].split(',') if permission_tuple[0][1] else []  
+            wlist = permission_tuple[0][2].split(',') if permission_tuple[0][2] else []   
+            if "read" in permission_string.split(","):
                 return await get_directory_structure(path, blist, wlist)
-            else:
-                logging.error("File path doesn't exist. Simple search failed.")
-                raise HTTPException(404, f"File path doesn't exist: '{path}'")
+        else:
+            logging.error("Error! Cannot access simple search folder. Ask admin to give you access.")
+            raise HTTPException(501, "Error: Simple search - you don't have permission to read the file. Ask admin.")
     else:
-        logging.error("Error! Cannot access simple search folder. Ask admin to give you access.")
-        raise HTTPException(501, "Error: Simple search - you don't have permission to read the file. Ask admin.")
+        logging.error("File path doesn't exist. Simple search failed.")
+        raise HTTPException(404, f"File path doesn't exist: '{path}'")
+
      
 ### Download file
 @BasicRouter.get("/download-file/", tags=["Local-File"], name="Download File")
