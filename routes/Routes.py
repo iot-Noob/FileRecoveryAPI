@@ -358,9 +358,7 @@ async def search_simple(path: str = Query(...), token: str = Depends(is_token_va
     uid = await decode_jwt(token=token)
     cuid = uid['id']
     permission_tuple = QueryRun(dp_paths, "SELECT permission, blacklist, whitelist FROM User_Permission WHERE user_id = ? AND filepath = ?", (cuid, path))
-
-        
-    
+ 
     if os.path.exists(path):
         if permission_tuple:
             permission_string = permission_tuple[0][0]   
@@ -386,11 +384,6 @@ async def download_file(file_path: str, token: str = Depends(is_token_valid_v2))
     if user_role_tuple:
         user_role = user_role_tuple[0]  # Extract the role from the tuple
         if user_role == "admin" or user_role == "user":
-            """
-            Download a file from the binary tree file system.
-
-            :param file_path: The path to the file relative to the root of the file system.
-            """
             # Check if the file path exists in the file system
             if not os.path.exists(file_path):
                 raise HTTPException(status_code=404, detail="File not found")

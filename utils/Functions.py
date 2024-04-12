@@ -36,7 +36,6 @@ async def is_token_valid_v2(token: str = Depends(security)):
 ### Login
 def get_db():
     return dp_paths 
- 
 async def get_directory_structure(path: str, blist: List[str] = None, wlist: List[str] = None):
     logging.debug(f"Processing directory: {path}")
     structure = {"name": os.path.basename(path)}
@@ -45,13 +44,42 @@ async def get_directory_structure(path: str, blist: List[str] = None, wlist: Lis
         for child in os.listdir(path):
             child_path = os.path.join(path, child)
             logging.debug(f"Checking child: {child}")
-            if (blist and any(re.match(pattern, child) for pattern in blist)) or (wlist and not any(re.match(pattern, child) for pattern in wlist)):
-                logging.debug(f"Skipping child due to blacklist/whitelist: {child}")
-            else:
+            included_by_whitelist = False
+            if wlist:
+                for pattern in wlist:
+                    if pattern.startswith("."):
+                        if child.endswith(pattern):
+                            included_by_whitelist = True
+                            break
+                    elif pattern in child:
+                        included_by_whitelist = True
+                        break
+            
+            if included_by_whitelist:
+                logging.debug(f"Included by whitelist: {child}")
                 logging.debug(f"Appending child: {child}")
                 child_structure = await get_directory_structure(child_path, blist, wlist)
                 if child_structure is not None:
                     structure["children"].append(child_structure)
+            else:
+                included_by_blacklist = False
+                if blist:
+                    for pattern in blist:
+                        if pattern.startswith("."):
+                            if child.endswith(pattern):
+                                included_by_blacklist = True
+                                break
+                        elif pattern in child:
+                            included_by_blacklist = True
+                            break
+                
+                if not included_by_blacklist:
+                    logging.debug(f"Appending child: {child}")
+                    child_structure = await get_directory_structure(child_path, blist, wlist)
+                    if child_structure is not None:
+                        structure["children"].append(child_structure)
+                else:
+                    logging.debug(f"Skipping child due to blacklist: {child}")
     except Exception as e:
         logging.error(f"Error processing directory {path}: {e}")
         # Log the error but continue processing other files and directories
