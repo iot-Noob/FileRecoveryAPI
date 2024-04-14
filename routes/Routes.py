@@ -381,44 +381,36 @@ async def download_file(file_path: str, token: str = Depends(is_token_valid_v2))
     uid = dec_tok['id']
     user_role_tuple = QueryRun_Single(dp_paths, "SELECT user_role FROM User WHERE id = ?", (uid,))
     permission_tuple = QueryRun(dp_paths, "SELECT permission, filepath, blacklist, whitelist FROM User_Permission WHERE user_id = ?", (uid,))
-    bl=[]
-    wl=[]
-    for bwl in permission_tuple:
-        # Split and strip values from blacklist column
-        bl_values = bwl[2].split(',') if bwl[2] else []
-        bl.append(bl_values)
 
-        # Split and strip values from whitelist column
-        wl_values = bwl[3].split(',') if bwl[3] else []
-        wl.append(wl_values)
- 
     if user_role_tuple:
-        user_role = user_role_tuple[0]  # Extract the role from the tuple
+        user_role = user_role_tuple[0]  
         if user_role == "admin" or user_role == "user":
-            # Check if the file path exists in the file system
+   
             if not os.path.exists(file_path) or not os.path.isfile(file_path):
                 logging.error("File path does not exist, or your file is not a file but a folder")
                 raise HTTPException(status_code=404, detail="File not found or your file is not a file but a folder")
             else:
-                # Check if the requested file path falls within the allowed directory
+                
+                allowed = False
                 for directory_permission in permission_tuple:
-                    if file_path.startswith(directory_permission[1]):
+                    if file_path == directory_permission[1]:   
                         if "download" in directory_permission[0].split(","):
-                            fname=os.path.basename(file_path)
-                            return FileResponse(file_path,filename=fname)
-                        else:
-                            logging.error("Error downloading file: User does not have permission to download files")
-                            raise HTTPException(status_code=403, detail="Error downloading file: User does not have permission to download files")
-                # If the file path doesn't match any allowed directory, raise an exception
-                logging.error("Access denied: You do not have permission to download files outside the allowed directories")
-                raise HTTPException(status_code=403, detail="Access denied: You do not have permission to download files outside the allowed directories")
-
+                            allowed = True
+                            break  
+                if allowed:
+                    fname=os.path.basename(file_path)
+                    return FileResponse(file_path,filename=fname)
+                else:
+                    logging.error("Error downloading file: User does not have permission to download files")
+                    raise HTTPException(status_code=403, detail="Error downloading file: User does not have permission to download files")
         else:
             logging.error("Error downloading file: Access denied: You do not have permission to download files")
             raise HTTPException(status_code=403, detail="Access denied: You do not have permission to download files")
     else:
         logging.error("Failed to fetch data from the database to download file")
         raise HTTPException(status_code=500, detail="Failed to fetch user role from the database")
+
+
 
 ## List local dirs
 
