@@ -149,3 +149,13 @@ async def create_file_tree(path: str, blist: list, wlist: list):
         logging.error("BST Error cannot detect file.")
         raise HTTPException(500, "Cannot detect file error")
     return root
+async def extract_path(query)->list:
+    try:
+        extracted_queries = []
+        for q in query:
+            
+            extracted_queries.append(q[3])
+        return extracted_queries
+    except Exception as e:
+        raise HTTPException(405, f"Cannot extract queries: {e}")
+             
