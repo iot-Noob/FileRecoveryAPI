@@ -404,7 +404,8 @@ async def download_file(file_path: str, token: str = Depends(is_token_valid_v2))
                 for directory_permission in permission_tuple:
                     if file_path.startswith(directory_permission[1]):
                         if "download" in directory_permission[0].split(","):
-                            return FileResponse(file_path)
+                            fname=os.path.basename(file_path)
+                            return FileResponse(file_path,filename=fname)
                         else:
                             logging.error("Error downloading file: User does not have permission to download files")
                             raise HTTPException(status_code=403, detail="Error downloading file: User does not have permission to download files")
